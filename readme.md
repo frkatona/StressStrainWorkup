@@ -1,5 +1,7 @@
 ![Stress-Strain for Paper-PDMS with a PolyFit](images/240108_Stress-Strain_Paper-PDMS_PolyFit.png)
 
+![Stress-Strain for Paper-PDMS with a PolyFit, zoomed in](images/240108_Stress-Strain_Paper-PDMS_PolyFit_zoom.png)
+
 # to address
  - make sure the linear region is consistently found in the FindLinearRegion function
  - alternate colors for each sample group with a standard colors array

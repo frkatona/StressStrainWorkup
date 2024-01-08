@@ -31,8 +31,8 @@ def read_data(file_path, width_mm, thickness_mm):
     stress_data = calculate_stress(raw_data, width_mm, thickness_mm)
 
     # Adjust data to start at 0 stress
-    min_stress = min(stress for _, stress in stress_data)
-    adjusted_data = [[strain, stress - min_stress] for strain, stress in stress_data]
+    first_stress = stress_data[0][1]  # Get the stress value from the first data point
+    adjusted_data = [[strain, stress - first_stress] for strain, stress in stress_data]
 
     return adjusted_data
 
@@ -41,7 +41,7 @@ def calculate_stress(data, width_mm, thickness_mm):
     area = width_mm * thickness_mm  # Area in mm²
     stress_data = []
     for strain, load in data:
-        stress = load / area  # Stress in MPa (assuming load is in N and area in mm²)
+        stress = load / area / 1000 # Stress in GPa (assuming load is in N and area in mm²)
         stress_data.append([strain, stress])
     return stress_data
 
@@ -105,9 +105,9 @@ def plot_data_with_custom_colors(sample_data, colors_file_path, width_mm, thickn
         reduced_saturation_color = (color_rgba[0], color_rgba[1], color_rgba[2], 0.25)
 
         data = read_data(file_path, width_mm, thickness_mm)
-        df = pd.DataFrame(data, columns=['Strain (mm/mm)', 'Stress (MPa)'])
+        df = pd.DataFrame(data, columns=['Strain (mm/mm)', 'Stress (GPa)'])
 
-        plt.plot(df['Strain (mm/mm)'], df['Stress (MPa)'], color=reduced_saturation_color)
+        plt.plot(df['Strain (mm/mm)'], df['Stress (GPa)'], color=reduced_saturation_color)
         
         # Fit and plot polynomial with full color
         x_fit, y_fit = fit_and_plot_polynomial(data, degree=3)
@@ -118,7 +118,7 @@ def plot_data_with_custom_colors(sample_data, colors_file_path, width_mm, thickn
             plt.plot(x_fit, y_fit, color=base_color)
 
     plt.xlabel('Strain (mm/mm)')
-    plt.ylabel('Load (N)')
+    plt.ylabel('Stress (GPa)')
     plt.title('Stress-Strain for Paper-PDMS Samples with 3rd-order Polynomial Fit')
     plt.legend()
     plt.grid(True)
