@@ -1,126 +1,135 @@
-from matplotlib import pyplot as plt
-import pandas as pd
-import numpy as np
-import colorsys
+import zipfile
 import os
 import pandas as pd
+import matplotlib.pyplot as plt
+import matplotlib.cm as cm
+import numpy as np
+from itertools import cycle
+from matplotlib.colors import to_rgba
 
-def Second_Derivative_Curve_Smooth(noisyData, smooth_width):
-    '''takes list-like input and smooth width to create convolution kernel for calculating the smoothed second order derivative'''
-    x1 = np.linspace(-3,3,smooth_width)
-    kernel_gaussian2ndDer = (4*x1**2 - 2) * np.exp(-x1**2) / smooth_width * 2
-    stress_smoothed_2ndDer = np.convolve(noisyData, kernel_gaussian2ndDer, mode="same")
-    return stress_smoothed_2ndDer
 
-def Find_Linear_Region(stress_2ndDer, smoothness_tolerance):
-    '''return region of linearity from convolution input as start and end indices'''
-    tolerance_index_low, tolerance_index_high = 20, 60 #default values
+# Function to parse folder names and return sample type
+def parse_folder_name(folder_name):
+    parts = folder_name.split('_')
+    if len(parts) == 3:
+        return tuple(parts)
+    else:
+        return None
+    
+def read_data(file_path, width_mm, thickness_mm):
+    with open(file_path, 'r') as file:
+        lines = file.readlines()
+    raw_data = []
+    for line in lines[8:]:  # Assuming data starts from line 9
+        split_line = line.strip().split('\t')
+        if len(split_line) >= 4:
+            strain = float(split_line[3])
+            load = float(split_line[1])
+            raw_data.append([strain, load])
+    
+    # Convert load to stress
+    stress_data = calculate_stress(raw_data, width_mm, thickness_mm)
 
-    for index, i in enumerate(stress_2ndDer):
-        if abs(i) > abs(smoothness_tolerance):
-            tolerance_index_high = index
-            return tolerance_index_low, tolerance_index_high, True
-    return tolerance_index_low, tolerance_index_high, False
+    # Adjust data to start at 0 stress
+    min_stress = min(stress for _, stress in stress_data)
+    adjusted_data = [[strain, stress - min_stress] for strain, stress in stress_data]
 
-def hsv_to_hex(h, s, v):
-    r, g, b = colorsys.hsv_to_rgb(h, s, v)
-    r = int(r * 255)
-    g = int(g * 255)
-    b = int(b * 255)
-    return "#{:02x}{:02x}{:02x}".format(r,g,b)
+    return adjusted_data
 
-def Customize_HSV_Value(hue, SV):
-    return hsv_to_hex(hue, SV, SV)
 
-def Plot_Dataframe_Axes(df, hue, size):
-    color_raw = Customize_HSV_Value(hue, .8)
-    color_2ndDer = Customize_HSV_Value(hue, .8)
-    color_fit = Customize_HSV_Value(hue, .8)
-    index_min, index_max, hasLinearRegion = Find_Linear_Region(df['Stress (N) 2nd Deriv'], 0.03)
-    try:
-        m, b = np.polyfit(df['Strain (%)'][index_min:index_max], df['Stress (N)'][index_min:index_max], 1)
-        converged = True
-    except:
-        m, b = -1, 0
-        converged = False
-    ax.plot(df['Strain (%)'], df['Stress (N)'], 'o', markersize = size, color = color_raw)
-    ax.plot(df['Strain (%)'], df['Stress (N) 2nd Deriv'], 'x', markersize = size, ls = '--',color = color_2ndDer, label = '2nd Deriv')
-    ax.plot(df['Strain (%)'], m*df['Strain (%)'] + b, color = color_fit, label = 'Linear Fit', linewidth = size)
-    return m, hasLinearRegion, converged
+def calculate_stress(data, width_mm, thickness_mm):
+    area = width_mm * thickness_mm  # Area in mm²
+    stress_data = []
+    for strain, load in data:
+        stress = load / area  # Stress in MPa (assuming load is in N and area in mm²)
+        stress_data.append([strain, stress])
+    return stress_data
 
-def Get_Txts_From_Subdirs(dir_path):
-    subdir_names = []
-    txt_file_paths = []
-    sampleNames = []
 
-    for root, dirs, files in os.walk(dir_path):
+def process_data_folder(data_folder_path):
+    sample_data = {}
+    for root, dirs, files in os.walk(data_folder_path):
         for file in files:
-            if file.endswith('.txt') or file.endswith('.csv'):
-                subdir_names.append(os.path.basename(root))
-                txt_file_paths.append(os.path.join(root, file))
-                sampleNames.append(file.split("\\")[-1].split(".")[-2])
+            if file.endswith('.txt'):
+                folder_name = os.path.basename(root)
+                sample_type = parse_folder_name(folder_name)
+                if sample_type:
+                    sample_key = "_".join(sample_type[:2])
+                    file_path = os.path.join(root, file)
+                    unique_key = f"{sample_key}_{len(sample_data)}"
+                    sample_data[unique_key] = file_path
 
-    df = pd.DataFrame({
-        'Path': txt_file_paths,
-        'File Name': subdir_names,
-        'Sample': sampleNames
-    })
+    return sample_data
 
-    return df
+def fit_and_plot_polynomial(data, degree=3, exclude_final_points=5):
+    # Exclude the final 30 points from the fitting process
+    if len(data) > exclude_final_points:
+        data_for_fit = data[:-exclude_final_points]
+    else:
+        data_for_fit = data
 
-def Workup_SS_Data(df_index):
-    width = 6
-    hue = 1
-    thick = []
-    YM = []
-    toughness = []
-    linearRegionFound = []
-    converged = []
-    strainAtBreak = []
-    for file in df_index['Path']:
-        df = pd.read_csv(file, sep='\t', names = ['Crosshead', 'Load', 'Time', 'Strain (%)', 'Video Time'], skiprows = 8)
-        try:
-            thickness = int(file.split("\\")[-2].split("_")[-1])
-        except:
-            thickness = 30
-        if thickness < 5:
-            thickness = 30
-        crossSection = width * thickness
-        df['Stress (N)'] = df['Load'] / crossSection
-        df['Stress (N) 2nd Deriv'] = Second_Derivative_Curve_Smooth(df['Stress (N)'], 5)
-        area = np.trapz(df['Stress (N)'], df['Strain (%)'])
-        m, foundLinear, foundConverge = Plot_Dataframe_Axes(df, hue % 1, 1)
-        thick.append(thickness)
-        strainAtBreak.append(df['Strain (%)'].iloc[-3] * 100)
-        toughness.append(area)
-        YM.append(m)
-        linearRegionFound.append(foundLinear)
-        converged.append(foundConverge)
-        hue += .1
-    df_index['Thickness (mm)'] = thick
-    df_index['YM (MPa)'] = YM
-    df_index['Strain at Break (%)'] = strainAtBreak
-    df_index['Toughness (J)'] = toughness
-    df_index['Linear Region Found'] = linearRegionFound
-    df_index['Converged'] = converged
+    x = np.array([point[0] for point in data_for_fit])
+    y = np.array([point[1] for point in data_for_fit])
+    coefficients = np.polyfit(x, y, degree)
+    polynomial = np.poly1d(coefficients)
 
-if __name__ == "__main__":
-    ## INIT ##
-    fig, ax = plt.subplots()
-    dirPath = r'CSVs\230323_cbPDMS_RAMPetc'
+    # Generate x values for plotting the polynomial fit
+    x_fit = np.linspace(x.min(), x.max(), 500)
+    y_fit = polynomial(x_fit)
 
-    ## DATA PROCESSING ##
-    df_index = Get_Txts_From_Subdirs(dirPath)
-    Workup_SS_Data(df_index)
-    df_index.sort_values(by=['Sample'])
+    return x_fit, y_fit
 
-    ## PLOT FORMATTING ##
-    dataset_name = dirPath.split("\\")[-1]
-    plt.title(f"Stress-Strain Curves for {dataset_name}")
-    plt.xlabel('Strain (%)')
-    plt.ylabel('Stress (N)')
+def read_colors(file_path):
+    with open(file_path, 'r') as file:
+        colors = [line.strip() for line in file.readlines()]
+    return colors
+
+
+def plot_data_with_custom_colors(sample_data, colors_file_path, width_mm, thickness_mm):
+    custom_colors = read_colors(colors_file_path)
+    color_iterator = cycle(custom_colors)
+
+    color_mapping = {}
+    for key in sample_data.keys():
+        x_y_prefix = "_".join(key.split('_')[:2])
+        if x_y_prefix not in color_mapping:
+            color_mapping[x_y_prefix] = next(color_iterator)
+
+    plt.figure(figsize=(12, 8))
+
+    added_to_legend = set()
+    for sample_key, file_path in sample_data.items():
+        x_y_prefix = "_".join(sample_key.split('_')[:2])
+        base_color = color_mapping[x_y_prefix]
+        color_rgba = to_rgba(base_color)
+        reduced_saturation_color = (color_rgba[0], color_rgba[1], color_rgba[2], 0.25)
+
+        data = read_data(file_path, width_mm, thickness_mm)
+        df = pd.DataFrame(data, columns=['Strain (mm/mm)', 'Stress (MPa)'])
+
+        plt.plot(df['Strain (mm/mm)'], df['Stress (MPa)'], color=reduced_saturation_color)
+        
+        # Fit and plot polynomial with full color
+        x_fit, y_fit = fit_and_plot_polynomial(data, degree=3)
+        if x_y_prefix not in added_to_legend:
+            plt.plot(x_fit, y_fit, color=base_color, label=x_y_prefix)
+            added_to_legend.add(x_y_prefix)
+        else:
+            plt.plot(x_fit, y_fit, color=base_color)
+
+    plt.xlabel('Strain (mm/mm)')
+    plt.ylabel('Load (N)')
+    plt.title('Stress-Strain for Paper-PDMS Samples with 3rd-order Polynomial Fit')
+    plt.legend()
+    plt.grid(True)
     plt.show()
 
-    ## OUTPUT ##
-    print(df_index[['File Name', 'Linear Region Found', 'Converged', 'Thickness (mm)', 'YM (MPa)', 'Toughness (J)', 'Strain at Break (%)']])
-    # df_index.to_csv(f'Exports/{dataset_name}_Workup.csv')
+## Define the dimensions of the sample (in mm)
+width_mm = 0.1
+thickness_mm = 0.01
+
+## process and plot data
+data_folder_path = r"CSVs\24-01-08_Tensile_paper-PDMS"
+colors_folder_path = "dist\colorlist_lear.txt"
+sample_data = sample_data = process_data_folder(data_folder_path)
+plot_data_with_custom_colors(sample_data, colors_folder_path, width_mm, thickness_mm)
