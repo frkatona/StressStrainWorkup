@@ -18,3 +18,4 @@ def rename_and_move_files(parent_directory):
 
 parent_directory = r"C:\Users\antho\OneDrive\1 - Thesis Data - Master\1_Tensile Data\Seen\Not Seen\Tensile Data\50kN Load Frame Data\50kNLoadFrame\220207_cbPDMS"  # Replace with your actual parent directory path
 rename_and_move_files(parent_directory)
+
